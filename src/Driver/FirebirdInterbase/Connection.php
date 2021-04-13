@@ -76,13 +76,13 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
     protected $attrAutoCommit = true;
 
     /**
-     * @param string $params
+     * @param string      $params
      * @param null|string $username
      * @param null|string $password
-     * @param null|array $driverOptions
+     * @param null|array  $driverOptions
      * @throws \RuntimeException
      */
-    public function __construct(array $params, $username, $password, array $driverOptions = array())
+    public function __construct(array $params, $username, $password, array $driverOptions = [])
     {
         $this->close(); // Close/reset; because calling __construct after instantiation is apparently a thing
 
@@ -100,11 +100,12 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
             $this->buffers = $params['buffers'];
         }
         $this->dialect = self::DEFAULT_DIALECT;
-        if (isset($params['dialect'])
-            && is_int($params['dialect'])
-            && $params['dialect'] >= 0
-            && $params['dialect'] <= 3) {
-            $this->dialect = $params['dialect'];
+
+        if (isset($params['driverOptions']['dialect'])
+            && is_int($params['driverOptions']['dialect'])
+            && $params['driverOptions']['dialect'] >= 0
+            && $params['driverOptions']['dialect'] <= 3) {
+            $this->dialect = $params['driverOptions']['dialect'];
         }
         $this->username = $username;
         $this->password = $password;
@@ -129,7 +130,7 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
      * isolation level used for transactions.
      *
      * @param string $attribute
-     * @param mixed $value
+     * @param mixed  $value
      */
     public function setAttribute($attribute, $value)
     {
@@ -145,6 +146,7 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
                 break;
         }
     }
+
     /**
      * {@inheritDoc}
      *
@@ -204,19 +206,21 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
         $sql = $args[0];
         $stmt = $this->prepare($sql);
         $stmt->execute();
+
         return $stmt;
     }
 
     /**
      * {@inheritdoc}
      */
-    public function quote($value, $type=\PDO::PARAM_STR)
+    public function quote($value, $type = \PDO::PARAM_STR)
     {
         if (is_int($value) || is_float($value)) {
             return $value;
         }
         $value = str_replace("'", "''", $value);
-        return "'" . addcslashes($value, "\000\n\r\\\032") . "'";
+
+        return "'".addcslashes($value, "\000\n\r\\\032")."'";
     }
 
     /**
@@ -226,6 +230,7 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
     {
         $stmt = $this->prepare($statement);
         $stmt->execute();
+
         return $stmt->rowCount();
     }
 
@@ -257,27 +262,28 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
         $sql = "SELECT GEN_ID({$name}, 0) LAST_VAL FROM RDB\$DATABASE";
         $stmt = $this->query($sql);
         $result = $stmt->fetchColumn(0);
+
         return $result;
     }
 
     /**
      * @throws Exception
      */
-    public function getStartTransactionSql(int $isolationLevel): string
+    public function getStartTransactionSql(int $isolationLevel): int
     {
-        $result = "";
+        $trans_args = 0;
         switch ($isolationLevel) {
             case \Doctrine\DBAL\Connection::TRANSACTION_READ_UNCOMMITTED:
-                $result .= 'SET TRANSACTION READ WRITE ISOLATION LEVEL READ COMMITTED RECORD_VERSION';
+                $trans_args .= IBASE_READ + IBASE_COMMITTED + IBASE_REC_VERSION;
                 break;
             case \Doctrine\DBAL\Connection::TRANSACTION_READ_COMMITTED:
-                $result .= 'SET TRANSACTION READ WRITE ISOLATION LEVEL READ COMMITTED RECORD_VERSION';
+                $trans_args .= IBASE_READ + IBASE_COMMITTED + IBASE_REC_VERSION;
                 break;
             case \Doctrine\DBAL\Connection::TRANSACTION_REPEATABLE_READ:
-                $result .= 'SET TRANSACTION READ WRITE ISOLATION LEVEL SNAPSHOT';
+                $trans_args .= IBASE_READ + IBASE_CONCURRENCY + IBASE_REC_VERSION;
                 break;
             case \Doctrine\DBAL\Connection::TRANSACTION_SERIALIZABLE:
-                $result .= 'SET TRANSACTION READ WRITE ISOLATION LEVEL SNAPSHOT TABLE STABILITY';
+                $trans_args .= IBASE_READ + IBASE_CONCURRENCY + IBASE_REC_VERSION;
                 break;
             default:
                 throw new Exception(sprintf(
@@ -285,14 +291,13 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
                     ValueFormatter::cast($isolationLevel)
                 ));
         }
-        if (($this->attrDcTransWait > 0)) {
-            $result .= ' WAIT LOCK TIMEOUT ' . $this->attrDcTransWait;
-        } elseif  (($this->attrDcTransWait === -1)) {
-            $result .= ' WAIT';
+        if (($this->attrDcTransWait === -1)) {
+            $trans_args += IBASE_WAIT;
         } else {
-            $result .= ' NO WAIT';
+            $trans_args += IBASE_NOWAIT;
         }
-        return $result;
+
+        return $trans_args;
     }
 
     /**
@@ -304,6 +309,7 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
             $this->_ibaseActiveTransaction = $this->createTransaction(true);
             $this->_ibaseTransactionLevel++;
         }
+
         return true;
     }
 
@@ -328,13 +334,14 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
         if (0 == $this->_ibaseTransactionLevel) {
             $this->_ibaseActiveTransaction = $this->createTransaction(true);
         }
+
         return true;
     }
 
     /**
      * Commits the transaction if autocommit is enabled no explicte transaction has been started.
-     * @throws \RuntimeException
      * @return null|bool
+     * @throws \RuntimeException
      */
     public function autoCommit()
     {
@@ -349,8 +356,10 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
             if (false == $success) {
                 $this->checkLastApiCall();
             }
+
             return true;
         }
+
         return null;
     }
 
@@ -374,6 +383,7 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
             $this->_ibaseTransactionLevel--;
         }
         $this->_ibaseActiveTransaction = $this->createTransaction(true);
+
         return true;
     }
 
@@ -397,6 +407,7 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
                 'message' => ibase_errmsg(),
             ];
         }
+
         return [
             'code' => 0,
             'message' => null,
@@ -404,8 +415,8 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
     }
 
     /**
-     * @throws \RuntimeException
      * @return resource
+     * @throws \RuntimeException
      */
     public function getActiveTransaction()
     {
@@ -447,6 +458,7 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
                 $this->_ibaseTransactionLevel
             ));
         }
+
         return $this->_ibaseActiveTransaction;
     }
 
@@ -473,11 +485,12 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
         if ($commitDefaultTransaction) {
             @ibase_commit($this->_ibaseConnectionRc);
         }
-        $sql = $this->getStartTransactionSql($this->attrDcTransIsolationLevel);
-        $result = @ibase_query($this->_ibaseConnectionRc, $sql);
+        $trans_args = $this->getStartTransactionSql($this->attrDcTransIsolationLevel);
+        $result = @ibase_trans($trans_args, $this->_ibaseConnectionRc);
         if (false == is_resource($result)) {
             $this->checkLastApiCall();
         }
+
         return $result;
     }
 
@@ -494,7 +507,7 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
             $success = @ibase_close($this->_ibaseConnectionRc);
         }
         $this->_ibaseConnectionRc = null;
-        $this->_ibaseActiveTransaction  = null;
+        $this->_ibaseActiveTransaction = null;
         $this->_ibaseTransactionLevel = 0;
         if (false == $success) {
             $this->checkLastApiCall();
@@ -502,8 +515,8 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
     }
 
     /**
-     * @throws \RuntimeException
      * @return string
+     * @throws \RuntimeException
      */
     public static function generateConnectString(array $params)
     {
@@ -513,9 +526,10 @@ class Connection implements ConnectionInterface, ServerInfoAwareConnection
                 if (!$params['port']) {
                     throw new \RuntimeException("Invalid \"port\" in argument \$params");
                 }
-                $str .= '/' . $params['port'];
+                $str .= '/'.$params['port'];
             }
-            $str .= ':' . $params['dbname'];
+            $str .= ':'.$params['dbname'];
+
             return $str;
         }
         throw new \RuntimeException("Argument \$params must contain non-empty \"host\" and \"dbname\"");
